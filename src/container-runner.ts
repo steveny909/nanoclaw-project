@@ -372,9 +372,24 @@ export async function runContainerAgent(
     return { status: 'error', result: null, error: `Container start failed: ${err}` };
   }
 
-  // Stream logs from the running container — fully decoupled from container lifecycle
-  const logFollower = spawn(CONTAINER_RUNTIME_BIN, ['logs', '-f', containerId], {
+  // Stream logs from the running container — fully decoupled from container lifecycle.
+  // Use --follow to stream, and --timestamps for ordering.
+  const logFollower = spawn(CONTAINER_RUNTIME_BIN, ['logs', '--follow', containerId], {
     stdio: ['ignore', 'pipe', 'pipe'],
+  });
+
+  // Also run `docker wait` to detect container exit independently of log stream.
+  // This ensures we detect completion even if the log stream misses the final output.
+  const waiter = spawn(CONTAINER_RUNTIME_BIN, ['wait', containerId], {
+    stdio: ['ignore', 'pipe', 'ignore'],
+  });
+  waiter.stdout.on('data', (data) => {
+    const exitCode = parseInt(data.toString().trim(), 10);
+    logger.debug({ containerName, exitCode }, 'docker wait returned');
+    // Give the log follower a moment to flush remaining output, then kill it
+    setTimeout(() => {
+      logFollower.kill();
+    }, 1000);
   });
 
   // Register the log follower as the "process" for queue management,
