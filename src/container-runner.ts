@@ -230,7 +230,7 @@ async function buildContainerArgs(
   containerName: string,
   agentIdentifier?: string,
 ): Promise<string[]> {
-  const args: string[] = ['run', '-i', '--rm', '--name', containerName];
+  const args: string[] = ['run', '--rm', '--name', containerName];
 
   // Pass host timezone so container's local time matches the user's
   args.push('-e', `TZ=${TIMEZONE}`);
@@ -339,9 +339,16 @@ export async function runContainerAgent(
   const logsDir = path.join(groupDir, 'logs');
   fs.mkdirSync(logsDir, { recursive: true });
 
+  // Write input to a temp file and mount it into the container.
+  // This avoids stdin pipe races that cause OrbStack to kill containers
+  // when the docker client's stdin closes before the container finishes.
+  const inputFile = path.join(os.tmpdir(), `nanoclaw-input-${containerName}.json`);
+  fs.writeFileSync(inputFile, JSON.stringify(input));
+  containerArgs.push('-v', `${inputFile}:/tmp/input.json:ro`);
+
   return new Promise((resolve) => {
     const container = spawn(CONTAINER_RUNTIME_BIN, containerArgs, {
-      stdio: ['pipe', 'pipe', 'pipe'],
+      stdio: ['ignore', 'pipe', 'pipe'],
       detached: true,
     });
 
@@ -351,9 +358,6 @@ export async function runContainerAgent(
     let stderr = '';
     let stdoutTruncated = false;
     let stderrTruncated = false;
-
-    container.stdin.write(JSON.stringify(input));
-    container.stdin.end();
 
     // Streaming output: parse OUTPUT_START/END marker pairs as they arrive
     let parseBuffer = '';
@@ -466,9 +470,16 @@ export async function runContainerAgent(
       timeout = setTimeout(killOnTimeout, timeoutMs);
     };
 
-    container.on('close', (code) => {
+    container.on('close', (code, signal) => {
       clearTimeout(timeout);
+      // Clean up temp input file
+      try { fs.unlinkSync(inputFile); } catch { /* ignore */ }
       const duration = Date.now() - startTime;
+
+      logger.info(
+        { group: group.name, containerName, code, signal, duration, timedOut, hadStreamingOutput },
+        'Container close event',
+      );
 
       if (timedOut) {
         const ts = new Date().toISOString().replace(/[:.]/g, '-');
