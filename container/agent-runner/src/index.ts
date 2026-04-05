@@ -397,6 +397,7 @@ async function runQuery(
   sessionId: string | undefined,
   mcpServerPath: string,
   memoryMcpPath: string,
+  ollamaMcpPath: string,
   containerInput: ContainerInput,
   sdkEnv: Record<string, string | undefined>,
   resumeAt?: string,
@@ -510,6 +511,7 @@ async function runQuery(
         'mcp__nanoclaw__*',
         'mcp__memory__*',
         'mcp__gmail__*',
+        'mcp__ollama__*',
       ],
       env: sdkEnv,
       permissionMode: 'bypassPermissions',
@@ -539,6 +541,14 @@ async function runQuery(
         gmail: {
           command: 'npx',
           args: ['-y', '@gongrzhe/server-gmail-autoauth-mcp'],
+        },
+        ollama: {
+          command: 'node',
+          args: [ollamaMcpPath],
+          env: {
+            OLLAMA_HOST: `http://${process.env.OLLAMA_HOST || 'host.docker.internal:11434'}`,
+            OLLAMA_ADMIN_TOOLS: process.env.OLLAMA_ADMIN_TOOLS || '',
+          },
         },
       },
       hooks: {
@@ -687,6 +697,7 @@ async function main(): Promise<void> {
   const __dirname = path.dirname(fileURLToPath(import.meta.url));
   const mcpServerPath = path.join(__dirname, 'ipc-mcp-stdio.js');
   const memoryMcpPath = path.join(__dirname, 'memory-mcp.js');
+  const ollamaMcpPath = path.join(__dirname, 'ollama-mcp-stdio.js');
 
   let sessionId = containerInput.sessionId;
   fs.mkdirSync(IPC_INPUT_DIR, { recursive: true });
@@ -844,6 +855,7 @@ async function main(): Promise<void> {
         sessionId,
         mcpServerPath,
         memoryMcpPath,
+        ollamaMcpPath,
         containerInput,
         sdkEnv,
         resumeAt,
