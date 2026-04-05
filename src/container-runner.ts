@@ -2,7 +2,7 @@
  * Container Runner for NanoClaw
  * Spawns agent execution in containers and handles IPC
  */
-import { ChildProcess, execSync, spawn } from 'child_process';
+import { ChildProcess, spawn } from 'child_process';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
@@ -230,7 +230,7 @@ async function buildContainerArgs(
   containerName: string,
   agentIdentifier?: string,
 ): Promise<string[]> {
-  const args: string[] = ['create', '--name', containerName, '--memory=2g', '--cpus=4'];
+  const args: string[] = ['run', '--rm', '--name', containerName];
 
   // Pass host timezone so container's local time matches the user's
   args.push('-e', `TZ=${TIMEZONE}`);
@@ -346,59 +346,15 @@ export async function runContainerAgent(
   const imageIdx = containerArgs.length - 1;
   containerArgs.splice(imageIdx, 0, '-v', `${inputFile}:/tmp/input.json:ro`);
 
-  // Use docker create + start + logs pattern instead of docker run.
-  // This decouples the container lifecycle from Node.js process management,
-  // preventing OrbStack from killing containers when the CLI client exits.
-  let containerId: string;
-  try {
-    containerId = execSync(
-      `${CONTAINER_RUNTIME_BIN} ${containerArgs.map(a => `'${a}'`).join(' ')}`,
-      { stdio: ['pipe', 'pipe', 'pipe'], timeout: 30000 },
-    ).toString().trim();
-  } catch (err) {
-    try { fs.unlinkSync(inputFile); } catch { /* ignore */ }
-    logger.error({ group: group.name, err }, 'Failed to create container');
-    return { status: 'error', result: null, error: `Container create failed: ${err}` };
-  }
-
-  // Start the container first
-  try {
-    execSync(`${CONTAINER_RUNTIME_BIN} start ${containerId}`, {
-      stdio: 'pipe', timeout: 10000,
-    });
-  } catch (err) {
-    try { execSync(`${CONTAINER_RUNTIME_BIN} rm -f ${containerId}`, { stdio: 'pipe' }); } catch { /* ignore */ }
-    try { fs.unlinkSync(inputFile); } catch { /* ignore */ }
-    logger.error({ group: group.name, err }, 'Failed to start container');
-    return { status: 'error', result: null, error: `Container start failed: ${err}` };
-  }
-
-  // Stream ALL logs (--follow replays from beginning + follows new output).
-  // Container is already running, but --follow with no --since replays everything.
-  const logFollower = spawn(CONTAINER_RUNTIME_BIN, ['logs', '--follow', containerId], {
+  // Spawn container via docker run. Input is passed via mounted file, not stdin.
+  const container = spawn(CONTAINER_RUNTIME_BIN, containerArgs, {
     stdio: ['ignore', 'pipe', 'pipe'],
   });
 
-  // docker wait detects container exit independently of log stream.
-  // When container exits, give log follower 2s to flush, then kill it.
-  const waiter = spawn(CONTAINER_RUNTIME_BIN, ['wait', containerId], {
-    stdio: ['ignore', 'pipe', 'ignore'],
-  });
-  waiter.stdout.on('data', (data) => {
-    const exitCode = parseInt(data.toString().trim(), 10);
-    logger.debug({ containerName, exitCode }, 'docker wait returned');
-    setTimeout(() => {
-      logFollower.kill();
-    }, 2000);
-  });
+  onProcess(container, containerName);
 
-  // Register the log follower as the "process" for queue management,
-  // but container lifecycle is independent of this process.
-  onProcess(logFollower, containerName);
-
-  // Helper to clean up the container
-  const removeContainer = () => {
-    try { execSync(`${CONTAINER_RUNTIME_BIN} rm -f ${containerId}`, { stdio: 'pipe', timeout: 10000 }); } catch { /* ignore */ }
+  // Helper to clean up temp file
+  const cleanupInputFile = () => {
     try { fs.unlinkSync(inputFile); } catch { /* ignore */ }
   };
 
@@ -413,7 +369,7 @@ export async function runContainerAgent(
     let newSessionId: string | undefined;
     let outputChain = Promise.resolve();
 
-    logFollower.stdout.on('data', (data) => {
+    container.stdout.on('data', (data) => {
       const chunk = data.toString();
 
       // Always accumulate for logging
@@ -465,7 +421,7 @@ export async function runContainerAgent(
       }
     });
 
-    logFollower.stderr.on('data', (data) => {
+    container.stderr.on('data', (data) => {
       const chunk = data.toString();
       const lines = chunk.trim().split('\n');
       for (const line of lines) {
@@ -501,13 +457,13 @@ export async function runContainerAgent(
         'Container timeout, stopping gracefully',
       );
       try {
-        execSync(`${CONTAINER_RUNTIME_BIN} stop -t 5 ${containerId}`, { stdio: 'pipe', timeout: 15000 });
+        stopContainer(containerName);
       } catch (err) {
         logger.warn(
           { group: group.name, containerName, err },
           'Graceful stop failed, force killing',
         );
-        try { execSync(`${CONTAINER_RUNTIME_BIN} kill ${containerId}`, { stdio: 'pipe' }); } catch { /* ignore */ }
+        container.kill('SIGKILL');
       }
     };
 
@@ -519,20 +475,9 @@ export async function runContainerAgent(
       timeout = setTimeout(killOnTimeout, timeoutMs);
     };
 
-    logFollower.on('close', () => {
+    container.on('close', (code, signal) => {
       clearTimeout(timeout);
-
-      // Get the actual container exit code via docker inspect
-      let code: number | null = null;
-      try {
-        const inspectOut = execSync(
-          `${CONTAINER_RUNTIME_BIN} inspect --format='{{.State.ExitCode}}' ${containerId}`,
-          { stdio: 'pipe', timeout: 5000 },
-        ).toString().trim();
-        code = parseInt(inspectOut, 10);
-      } catch { /* container may already be removed */ }
-
-      removeContainer();
+      cleanupInputFile();
       const duration = Date.now() - startTime;
 
       logger.info(
@@ -760,9 +705,9 @@ export async function runContainerAgent(
       }
     });
 
-    logFollower.on('error', (err: Error) => {
+    container.on('error', (err: Error) => {
       clearTimeout(timeout);
-      removeContainer();
+      cleanupInputFile();
       logger.error(
         { group: group.name, containerName, error: err },
         'Container log follower error',
