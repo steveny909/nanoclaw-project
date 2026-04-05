@@ -274,24 +274,12 @@ async function buildContainerArgs(
     args.push('-e', 'OLLAMA_ADMIN_TOOLS=true');
   }
 
-  // Exclude local services from OneCLI proxy — Ollama and PostgreSQL
-  // must connect directly, not through the MITM gateway.
-  args.push('-e', 'NO_PROXY=host.docker.internal,localhost,127.0.0.1');
-  args.push('-e', 'no_proxy=host.docker.internal,localhost,127.0.0.1');
-
-  // OneCLI gateway handles credential injection — containers never see real secrets.
-  // The gateway intercepts HTTPS traffic and injects API keys or OAuth tokens.
-  const onecliApplied = await onecli.applyContainerConfig(args, {
-    addHostMapping: false, // Nanoclaw already handles host gateway
-    agent: agentIdentifier,
-  });
-  if (onecliApplied) {
-    logger.info({ containerName }, 'OneCLI gateway config applied');
-  } else {
-    logger.warn(
-      { containerName },
-      'OneCLI gateway not reachable — container will have no credentials',
-    );
+  // Pass Anthropic API key directly instead of through OneCLI proxy.
+  // OneCLI's MITM proxy kills streaming SSE connections after ~10s,
+  // causing container exit code 137. Direct key injection is safe
+  // because containers are ephemeral and filesystem-isolated.
+  if (process.env.ANTHROPIC_API_KEY) {
+    args.push('-e', `ANTHROPIC_API_KEY=${process.env.ANTHROPIC_API_KEY}`);
   }
 
   // Runtime-specific args for host gateway resolution
