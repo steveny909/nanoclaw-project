@@ -13,6 +13,7 @@ import {
   DATA_DIR,
   GROUPS_DIR,
   IDLE_TIMEOUT,
+  OLLAMA_ADMIN_TOOLS,
   ONECLI_URL,
   TIMEZONE,
 } from './config.js';
@@ -254,6 +255,11 @@ async function buildContainerArgs(
   }
   if (process.env.OLLAMA_EMBED_MODEL) {
     args.push('-e', `OLLAMA_EMBED_MODEL=${process.env.OLLAMA_EMBED_MODEL}`);
+  }
+
+  // Forward Ollama admin tools flag if enabled
+  if (OLLAMA_ADMIN_TOOLS) {
+    args.push('-e', 'OLLAMA_ADMIN_TOOLS=true');
   }
 
   // OneCLI gateway handles credential injection — containers never see real secrets.
