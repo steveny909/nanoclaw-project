@@ -27,6 +27,7 @@ import {
   stopContainer,
 } from './container-runtime.js';
 import { OneCLI } from '@onecli-sh/sdk';
+import { readEnvFile } from './env.js';
 import { validateAdditionalMounts } from './mount-security.js';
 import { RegisteredGroup } from './types.js';
 
@@ -278,8 +279,9 @@ async function buildContainerArgs(
   // OneCLI's MITM proxy kills streaming SSE connections after ~10s,
   // causing container exit code 137. Direct key injection is safe
   // because containers are ephemeral and filesystem-isolated.
-  if (process.env.ANTHROPIC_API_KEY) {
-    args.push('-e', `ANTHROPIC_API_KEY=${process.env.ANTHROPIC_API_KEY}`);
+  const { ANTHROPIC_API_KEY } = readEnvFile(['ANTHROPIC_API_KEY']);
+  if (ANTHROPIC_API_KEY) {
+    args.push('-e', `ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}`);
   }
 
   // Runtime-specific args for host gateway resolution
