@@ -344,7 +344,9 @@ export async function runContainerAgent(
   // when the docker client's stdin closes before the container finishes.
   const inputFile = path.join(os.tmpdir(), `nanoclaw-input-${containerName}.json`);
   fs.writeFileSync(inputFile, JSON.stringify(input));
-  containerArgs.push('-v', `${inputFile}:/tmp/input.json:ro`);
+  // Insert mount before the image name (last element in containerArgs)
+  const imageIdx = containerArgs.length - 1;
+  containerArgs.splice(imageIdx, 0, '-v', `${inputFile}:/tmp/input.json:ro`);
 
   return new Promise((resolve) => {
     const container = spawn(CONTAINER_RUNTIME_BIN, containerArgs, {
