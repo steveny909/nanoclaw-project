@@ -361,41 +361,40 @@ export async function runContainerAgent(
     return { status: 'error', result: null, error: `Container create failed: ${err}` };
   }
 
-  // Attach log follower and waiter BEFORE starting the container.
-  // This ensures we capture all output from the very first byte.
+  // Start the container first
+  try {
+    execSync(`${CONTAINER_RUNTIME_BIN} start ${containerId}`, {
+      stdio: 'pipe', timeout: 10000,
+    });
+  } catch (err) {
+    try { execSync(`${CONTAINER_RUNTIME_BIN} rm -f ${containerId}`, { stdio: 'pipe' }); } catch { /* ignore */ }
+    try { fs.unlinkSync(inputFile); } catch { /* ignore */ }
+    logger.error({ group: group.name, err }, 'Failed to start container');
+    return { status: 'error', result: null, error: `Container start failed: ${err}` };
+  }
+
+  // Stream ALL logs (--follow replays from beginning + follows new output).
+  // Container is already running, but --follow with no --since replays everything.
   const logFollower = spawn(CONTAINER_RUNTIME_BIN, ['logs', '--follow', containerId], {
     stdio: ['ignore', 'pipe', 'pipe'],
   });
 
+  // docker wait detects container exit independently of log stream.
+  // When container exits, give log follower 2s to flush, then kill it.
   const waiter = spawn(CONTAINER_RUNTIME_BIN, ['wait', containerId], {
     stdio: ['ignore', 'pipe', 'ignore'],
   });
   waiter.stdout.on('data', (data) => {
     const exitCode = parseInt(data.toString().trim(), 10);
     logger.debug({ containerName, exitCode }, 'docker wait returned');
-    // Give the log follower a moment to flush remaining output, then kill it
     setTimeout(() => {
       logFollower.kill();
-    }, 1000);
+    }, 2000);
   });
 
   // Register the log follower as the "process" for queue management,
   // but container lifecycle is independent of this process.
   onProcess(logFollower, containerName);
-
-  // NOW start the container — log follower and waiter are already attached
-  try {
-    execSync(`${CONTAINER_RUNTIME_BIN} start ${containerId}`, {
-      stdio: 'pipe', timeout: 10000,
-    });
-  } catch (err) {
-    logFollower.kill();
-    waiter.kill();
-    try { execSync(`${CONTAINER_RUNTIME_BIN} rm -f ${containerId}`, { stdio: 'pipe' }); } catch { /* ignore */ }
-    try { fs.unlinkSync(inputFile); } catch { /* ignore */ }
-    logger.error({ group: group.name, err }, 'Failed to start container');
-    return { status: 'error', result: null, error: `Container start failed: ${err}` };
-  }
 
   // Helper to clean up the container
   const removeContainer = () => {
