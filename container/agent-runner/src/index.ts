@@ -475,7 +475,7 @@ async function runQuery(
   }
 
   for await (const message of query({
-    prompt: stream as AsyncIterable<SDKUserMessage>,
+    prompt: stream as unknown as string,
     options: {
       cwd: '/workspace/group',
       additionalDirectories: extraDirs.length > 0 ? extraDirs : undefined,
