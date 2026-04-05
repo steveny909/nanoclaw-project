@@ -79,7 +79,7 @@ const IPC_POLL_MS = 500;
  * Push-based async iterable for streaming user messages to the SDK.
  * Keeps the iterable alive until end() is called, preventing isSingleUserTurn.
  */
-class MessageStream {
+class MessageStream implements AsyncIterable<SDKUserMessage> {
   private queue: SDKUserMessage[] = [];
   private waiting: (() => void) | null = null;
   private done = false;
