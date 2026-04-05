@@ -375,6 +375,7 @@ async function runQuery(
   prompt: string,
   sessionId: string | undefined,
   mcpServerPath: string,
+  memoryMcpPath: string,
   containerInput: ContainerInput,
   sdkEnv: Record<string, string | undefined>,
   resumeAt?: string,
@@ -469,6 +470,7 @@ async function runQuery(
         'Skill',
         'NotebookEdit',
         'mcp__nanoclaw__*',
+        'mcp__memory__*',
       ],
       env: sdkEnv,
       permissionMode: 'bypassPermissions',
@@ -482,6 +484,17 @@ async function runQuery(
             NANOCLAW_CHAT_JID: containerInput.chatJid,
             NANOCLAW_GROUP_FOLDER: containerInput.groupFolder,
             NANOCLAW_IS_MAIN: containerInput.isMain ? '1' : '0',
+          },
+        },
+        memory: {
+          command: 'node',
+          args: [memoryMcpPath],
+          env: {
+            NANOCLAW_POSTGRES_URL: process.env.NANOCLAW_POSTGRES_URL || '',
+            NANOCLAW_INSTANCE_ID: process.env.NANOCLAW_INSTANCE_ID || '',
+            NANOCLAW_GROUP_ID: containerInput.groupFolder,
+            OLLAMA_HOST: process.env.OLLAMA_HOST || 'host.docker.internal:11434',
+            OLLAMA_EMBED_MODEL: process.env.OLLAMA_EMBED_MODEL || 'nomic-embed-text',
           },
         },
       },
@@ -630,6 +643,7 @@ async function main(): Promise<void> {
 
   const __dirname = path.dirname(fileURLToPath(import.meta.url));
   const mcpServerPath = path.join(__dirname, 'ipc-mcp-stdio.js');
+  const memoryMcpPath = path.join(__dirname, 'memory-mcp.js');
 
   let sessionId = containerInput.sessionId;
   fs.mkdirSync(IPC_INPUT_DIR, { recursive: true });
@@ -686,6 +700,7 @@ async function main(): Promise<void> {
         prompt,
         sessionId,
         mcpServerPath,
+        memoryMcpPath,
         containerInput,
         sdkEnv,
         resumeAt,

@@ -242,6 +242,20 @@ async function buildContainerArgs(
   // Pass host timezone so container's local time matches the user's
   args.push('-e', `TZ=${TIMEZONE}`);
 
+  // Pass PostgreSQL memory layer and Ollama config to container
+  if (process.env.NANOCLAW_POSTGRES_URL) {
+    args.push('-e', `NANOCLAW_POSTGRES_URL=${process.env.NANOCLAW_POSTGRES_URL}`);
+  }
+  if (process.env.NANOCLAW_INSTANCE_ID) {
+    args.push('-e', `NANOCLAW_INSTANCE_ID=${process.env.NANOCLAW_INSTANCE_ID}`);
+  }
+  if (process.env.OLLAMA_HOST) {
+    args.push('-e', `OLLAMA_HOST=${process.env.OLLAMA_HOST}`);
+  }
+  if (process.env.OLLAMA_EMBED_MODEL) {
+    args.push('-e', `OLLAMA_EMBED_MODEL=${process.env.OLLAMA_EMBED_MODEL}`);
+  }
+
   // OneCLI gateway handles credential injection — containers never see real secrets.
   // The gateway intercepts HTTPS traffic and injects API keys or OAuth tokens.
   const onecliApplied = await onecli.applyContainerConfig(args, {
