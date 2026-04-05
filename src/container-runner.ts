@@ -361,25 +361,12 @@ export async function runContainerAgent(
     return { status: 'error', result: null, error: `Container create failed: ${err}` };
   }
 
-  try {
-    execSync(`${CONTAINER_RUNTIME_BIN} start ${containerId}`, {
-      stdio: 'pipe', timeout: 10000,
-    });
-  } catch (err) {
-    try { execSync(`${CONTAINER_RUNTIME_BIN} rm -f ${containerId}`, { stdio: 'pipe' }); } catch { /* ignore */ }
-    try { fs.unlinkSync(inputFile); } catch { /* ignore */ }
-    logger.error({ group: group.name, err }, 'Failed to start container');
-    return { status: 'error', result: null, error: `Container start failed: ${err}` };
-  }
-
-  // Stream logs from the running container — fully decoupled from container lifecycle.
-  // Use --follow to stream, and --timestamps for ordering.
+  // Attach log follower and waiter BEFORE starting the container.
+  // This ensures we capture all output from the very first byte.
   const logFollower = spawn(CONTAINER_RUNTIME_BIN, ['logs', '--follow', containerId], {
     stdio: ['ignore', 'pipe', 'pipe'],
   });
 
-  // Also run `docker wait` to detect container exit independently of log stream.
-  // This ensures we detect completion even if the log stream misses the final output.
   const waiter = spawn(CONTAINER_RUNTIME_BIN, ['wait', containerId], {
     stdio: ['ignore', 'pipe', 'ignore'],
   });
@@ -395,6 +382,20 @@ export async function runContainerAgent(
   // Register the log follower as the "process" for queue management,
   // but container lifecycle is independent of this process.
   onProcess(logFollower, containerName);
+
+  // NOW start the container — log follower and waiter are already attached
+  try {
+    execSync(`${CONTAINER_RUNTIME_BIN} start ${containerId}`, {
+      stdio: 'pipe', timeout: 10000,
+    });
+  } catch (err) {
+    logFollower.kill();
+    waiter.kill();
+    try { execSync(`${CONTAINER_RUNTIME_BIN} rm -f ${containerId}`, { stdio: 'pipe' }); } catch { /* ignore */ }
+    try { fs.unlinkSync(inputFile); } catch { /* ignore */ }
+    logger.error({ group: group.name, err }, 'Failed to start container');
+    return { status: 'error', result: null, error: `Container start failed: ${err}` };
+  }
 
   // Helper to clean up the container
   const removeContainer = () => {
