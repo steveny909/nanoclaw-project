@@ -230,7 +230,7 @@ async function buildContainerArgs(
   containerName: string,
   agentIdentifier?: string,
 ): Promise<string[]> {
-  const args: string[] = ['create', '--name', containerName];
+  const args: string[] = ['create', '--name', containerName, '--memory=2g', '--cpus=4'];
 
   // Pass host timezone so container's local time matches the user's
   args.push('-e', `TZ=${TIMEZONE}`);
