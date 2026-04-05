@@ -274,6 +274,11 @@ async function buildContainerArgs(
     args.push('-e', 'OLLAMA_ADMIN_TOOLS=true');
   }
 
+  // Exclude local services from OneCLI proxy — Ollama and PostgreSQL
+  // must connect directly, not through the MITM gateway.
+  args.push('-e', 'NO_PROXY=host.docker.internal,localhost,127.0.0.1');
+  args.push('-e', 'no_proxy=host.docker.internal,localhost,127.0.0.1');
+
   // OneCLI gateway handles credential injection — containers never see real secrets.
   // The gateway intercepts HTTPS traffic and injects API keys or OAuth tokens.
   const onecliApplied = await onecli.applyContainerConfig(args, {
