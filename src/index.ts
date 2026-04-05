@@ -3,8 +3,11 @@ import path from 'path';
 
 import { OneCLI } from '@onecli-sh/sdk';
 
+import { spawn } from 'child_process';
+
 import {
   ASSISTANT_NAME,
+  CONTAINER_IMAGE,
   DEFAULT_TRIGGER,
   getTriggerPattern,
   GROUPS_DIR,
@@ -26,6 +29,7 @@ import {
   writeTasksSnapshot,
 } from './container-runner.js';
 import {
+  CONTAINER_RUNTIME_BIN,
   cleanupOrphans,
   ensureContainerRuntimeRunning,
 } from './container-runtime.js';
@@ -622,6 +626,17 @@ function recoverPendingMessages(): void {
 function ensureContainerSystemRunning(): void {
   ensureContainerRuntimeRunning();
   cleanupOrphans();
+
+  // Pre-warm the container image by running a no-op container.
+  // OrbStack kills early containers (~3-5s) on first use of an image;
+  // this warmup run absorbs that so real agent containers succeed first try.
+  try {
+    logger.info('Warming up container image...');
+    const warmup = spawn(CONTAINER_RUNTIME_BIN, [
+      'run', '--rm', CONTAINER_IMAGE, 'echo', 'warmup',
+    ], { stdio: 'pipe' });
+    warmup.on('close', () => logger.info('Container image warmed up'));
+  } catch { /* best effort */ }
 }
 
 async function main(): Promise<void> {
