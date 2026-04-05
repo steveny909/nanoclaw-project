@@ -606,6 +606,25 @@ export async function runContainerAgent(
       logger.debug({ logFile, verbose: isVerbose }, 'Container log written');
 
       if (code !== 0) {
+        // If the agent already produced output (sent to user), treat
+        // a non-zero exit during idle as success — not an error.
+        // This prevents costly retry loops when the container is killed
+        // during the idle/IPC-wait phase after responding.
+        if (hadStreamingOutput) {
+          logger.info(
+            { group: group.name, containerName, code, duration },
+            'Container exited non-zero after output (idle cleanup)',
+          );
+          outputChain.then(() => {
+            resolve({
+              status: 'success',
+              result: null,
+              newSessionId,
+            });
+          });
+          return;
+        }
+
         logger.error(
           {
             group: group.name,
