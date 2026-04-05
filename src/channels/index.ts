@@ -3,11 +3,12 @@
 
 // discord
 
-// gmail
-import './gmail.js';
+// gmail — uncomment when credentials are configured in ~/.gmail-mcp/
+// import './gmail.js';
 
 // slack
 
 // telegram
+import './telegram.js';
 
 // whatsapp
