@@ -482,6 +482,7 @@ async function runQuery(
       additionalDirectories: extraDirs.length > 0 ? extraDirs : undefined,
       resume: sessionId,
       resumeSessionAt: resumeAt,
+      model: process.env.ANTHROPIC_MODEL || undefined,
       systemPrompt: globalClaudeMd
         ? {
             type: 'preset' as const,
@@ -512,6 +513,7 @@ async function runQuery(
         'mcp__memory__*',
         'mcp__gmail__*',
         'mcp__ollama__*',
+        'mcp__notion__*',
       ],
       env: sdkEnv,
       permissionMode: 'bypassPermissions',
@@ -549,6 +551,14 @@ async function runQuery(
             OLLAMA_HOST: `http://${process.env.OLLAMA_HOST || 'host.docker.internal:11434'}`,
             OLLAMA_ADMIN_TOOLS: process.env.OLLAMA_ADMIN_TOOLS || '',
           },
+        },
+        notion: {
+          command: 'npx',
+          args: ['-y', '@notionhq/notion-mcp-server'],
+          env: {
+            ...process.env,
+            NOTION_TOKEN: process.env.NOTION_TOKEN || '',
+          } as Record<string, string>,
         },
       },
       hooks: {
@@ -741,6 +751,7 @@ async function main(): Promise<void> {
           cwd: '/workspace/group',
           resume: sessionId,
           systemPrompt: undefined,
+          model: process.env.ANTHROPIC_MODEL || undefined,
           allowedTools: [],
           env: sdkEnv,
           permissionMode: 'bypassPermissions' as const,

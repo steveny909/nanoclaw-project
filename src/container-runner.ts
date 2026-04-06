@@ -235,19 +235,23 @@ async function buildContainerArgs(
   // Pass host timezone so container's local time matches the user's
   args.push('-e', `TZ=${TIMEZONE}`);
 
-  // Pass PostgreSQL memory layer and Ollama config to container
-  if (process.env.NANOCLAW_POSTGRES_URL) {
-    args.push('-e', `NANOCLAW_POSTGRES_URL=${process.env.NANOCLAW_POSTGRES_URL}`);
-  }
-  if (process.env.NANOCLAW_INSTANCE_ID) {
-    args.push('-e', `NANOCLAW_INSTANCE_ID=${process.env.NANOCLAW_INSTANCE_ID}`);
-  }
-  if (process.env.OLLAMA_HOST) {
-    args.push('-e', `OLLAMA_HOST=${process.env.OLLAMA_HOST}`);
-  }
-  if (process.env.OLLAMA_EMBED_MODEL) {
-    args.push('-e', `OLLAMA_EMBED_MODEL=${process.env.OLLAMA_EMBED_MODEL}`);
-  }
+  // Pass PostgreSQL memory layer and Ollama config to container.
+  // Read from .env file (not process.env) because launchd-spawned NanoClaw
+  // does not load .env into the host process environment.
+  const envCfg = readEnvFile([
+    'NANOCLAW_POSTGRES_URL',
+    'NANOCLAW_INSTANCE_ID',
+    'OLLAMA_HOST',
+    'OLLAMA_EMBED_MODEL',
+  ]);
+  const pgUrl = process.env.NANOCLAW_POSTGRES_URL || envCfg.NANOCLAW_POSTGRES_URL;
+  const instanceId = process.env.NANOCLAW_INSTANCE_ID || envCfg.NANOCLAW_INSTANCE_ID;
+  const ollamaHost = process.env.OLLAMA_HOST || envCfg.OLLAMA_HOST;
+  const ollamaEmbed = process.env.OLLAMA_EMBED_MODEL || envCfg.OLLAMA_EMBED_MODEL;
+  if (pgUrl) args.push('-e', `NANOCLAW_POSTGRES_URL=${pgUrl}`);
+  if (instanceId) args.push('-e', `NANOCLAW_INSTANCE_ID=${instanceId}`);
+  if (ollamaHost) args.push('-e', `OLLAMA_HOST=${ollamaHost}`);
+  if (ollamaEmbed) args.push('-e', `OLLAMA_EMBED_MODEL=${ollamaEmbed}`);
 
   // Forward Ollama admin tools flag if enabled
   if (OLLAMA_ADMIN_TOOLS) {
@@ -258,9 +262,21 @@ async function buildContainerArgs(
   // OneCLI's MITM proxy kills streaming SSE connections after ~10s,
   // causing container exit code 137. Direct key injection is safe
   // because containers are ephemeral and filesystem-isolated.
-  const { ANTHROPIC_API_KEY } = readEnvFile(['ANTHROPIC_API_KEY']);
+  const { ANTHROPIC_API_KEY, ANTHROPIC_MODEL, NOTION_TOKEN } = readEnvFile([
+    'ANTHROPIC_API_KEY',
+    'ANTHROPIC_MODEL',
+    'NOTION_TOKEN',
+  ]);
+  if (NOTION_TOKEN) {
+    args.push('-e', `NOTION_TOKEN=${NOTION_TOKEN}`);
+  }
   if (ANTHROPIC_API_KEY) {
     args.push('-e', `ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}`);
+  }
+  // Global model selection from .env. Per-group override can be added later
+  // by threading the group config into buildContainerArgs.
+  if (ANTHROPIC_MODEL) {
+    args.push('-e', `ANTHROPIC_MODEL=${ANTHROPIC_MODEL}`);
   }
 
   // Runtime-specific args for host gateway resolution
@@ -601,25 +617,6 @@ export async function runContainerAgent(
       logger.debug({ logFile, verbose: isVerbose }, 'Container log written');
 
       if (code !== 0) {
-        // If the agent already produced output (sent to user), treat
-        // a non-zero exit during idle as success — not an error.
-        // This prevents costly retry loops when the container is killed
-        // during the idle/IPC-wait phase after responding.
-        if (hadStreamingOutput) {
-          logger.info(
-            { group: group.name, containerName, code, duration },
-            'Container exited non-zero after output (idle cleanup)',
-          );
-          outputChain.then(() => {
-            resolve({
-              status: 'success',
-              result: null,
-              newSessionId,
-            });
-          });
-          return;
-        }
-
         logger.error(
           {
             group: group.name,
